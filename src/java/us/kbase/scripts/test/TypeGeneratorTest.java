@@ -24,6 +24,11 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -818,8 +823,37 @@ public class TypeGeneratorTest extends Assert {
 	}
 
 	private static void runClientTest(int testNum, String testPackage, JavaData parsingData, 
-			File libDir, File binDir, int portNum, boolean needClientServer, File outDir,
+			File libDir, File binDir, final int origPortNum, boolean needClientServer, File outDir,
 			String serverType) throws Exception {
+	    System.out.println("Starting redirection...");
+	    HttpServlet redirServlet = new HttpServlet() {
+            private static final long serialVersionUID = -1L;
+            @Override 
+	        public final void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+                System.out.println("GET request before redirection");
+	            processRequest(req, resp);
+	        }
+	        @Override 
+	        public final void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+                System.out.println("POST request before redirection");
+	            processRequest(req, resp);
+	        }
+	        protected void processRequest(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+                long time = System.currentTimeMillis();
+                //req.getInputStream();
+	            resp.setStatus(307);
+	            resp.addHeader("Location", "http://localhost:" + origPortNum); 
+	            //sendRedirect(resp.encodeRedirectURL("http://localhost:" + origPortNum));
+                System.out.println("Request is being redirected (" + (System.currentTimeMillis() - time) + " ms.)");
+	        }
+	    };
+	    int portNum = findFreePort();
+	    Server redirServer = new Server(portNum);
+        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
+        context.setContextPath("/");
+        redirServer.setHandler(context);
+        context.addServlet(new ServletHolder(redirServlet), "/*");
+        redirServer.start();
 	    System.out.println("- Java client -> " + serverType + " server");
 	    runJavaClientTest(testNum, testPackage, parsingData, libDir, binDir, portNum, needClientServer);
 	    if (outDir != null) {
@@ -831,13 +865,14 @@ public class TypeGeneratorTest extends Assert {
 	        }
 	        if (clientConfigText.isEmpty())
                 return;
-	        System.out.println("- Perl client -> " + serverType + " server");
-	        runPerlClientTest(testNum, testPackage, parsingData, portNum, needClientServer, outDir);
+	        //System.out.println("- Perl client -> " + serverType + " server");
+	        //runPerlClientTest(testNum, testPackage, parsingData, portNum, needClientServer, outDir);
 	        System.out.println("- Python client -> " + serverType + " server");
             runPythonClientTest(testNum, testPackage, parsingData, portNum, needClientServer, outDir);
             System.out.println("- JavaScript client -> " + serverType + " server");
             runJsClientTest(testNum, testPackage, parsingData, portNum, needClientServer, outDir);
 	    }
+	    redirServer.stop();
 	}
 	
 	private static String pref(String testPackage) {
